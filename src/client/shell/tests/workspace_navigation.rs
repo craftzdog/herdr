@@ -1026,3 +1026,44 @@ fn kitty_ctrl_bracket_cancels_a_blocked_foreign_preview() {
     assert_ne!(state.mode, ClientShellMode::Navigate);
     assert!(state.navigate_workspace_id.is_none());
 }
+
+#[test]
+fn directional_pane_focus_wraps_to_the_opposite_edge_when_enabled() {
+    use crate::api::schema::Method;
+    use crate::input::KeybindAction;
+
+    let hit = |pane_id: &str, x| PaneHit {
+        rect: Rect::new(x, 0, 10, 10),
+        inner_rect: Rect::new(x, 0, 10, 10),
+        scrollbar_rect: None,
+        scroll: None,
+        pane_id: pane_id.into(),
+        popup: false,
+        mouse_reporting: false,
+        sgr_pixel_mouse: false,
+        pixel_width: 0,
+        pixel_height: 0,
+    };
+
+    for wrap in [false, true] {
+        let mut state = local_navigation_state(false);
+        state.config.wrap_pane_focus = wrap;
+        state.hits.panes = vec![hit("pane_1", 0), hit("pane_2", 10), hit("pane_3", 20)];
+
+        let edge = state.endpoint_method_for_action(KeybindAction::FocusPaneLeft);
+        if wrap {
+            let Some(Method::PaneFocus(target)) = edge else {
+                panic!("expected wrapped PaneFocus, got {edge:?}");
+            };
+            assert_eq!(target.pane_id, "pane_3");
+        } else {
+            assert!(matches!(edge, Some(Method::PaneFocusDirection(_))));
+        }
+
+        let neighbor = state.endpoint_method_for_action(KeybindAction::FocusPaneRight);
+        assert!(
+            matches!(neighbor, Some(Method::PaneFocusDirection(_))),
+            "a real neighbor stays server-resolved: {neighbor:?}"
+        );
+    }
+}

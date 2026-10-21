@@ -994,6 +994,12 @@
           "description": "Keep split panes visually separated instead of sharing divider borders."
         },
         {
+          "key": "ui.wrap_pane_focus",
+          "type": "boolean",
+          "default": "false",
+          "description": "Wrap directional pane focus to the pane on the opposite edge when there is no neighbor in that direction."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",

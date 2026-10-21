@@ -858,6 +858,41 @@ impl ClientShellState {
         (repaint, Vec::new())
     }
 
+    fn wrapped_focus_target(
+        &self,
+        focused_pane: Option<&str>,
+        direction: crate::api::schema::PaneDirection,
+    ) -> Option<String> {
+        if !self.config.wrap_pane_focus {
+            return None;
+        }
+        let focused_pane = focused_pane?;
+        let panes = self
+            .hits
+            .panes
+            .iter()
+            .filter(|pane| !pane.popup)
+            .collect::<Vec<_>>();
+        let focused = panes.iter().position(|pane| pane.pane_id == focused_pane)?;
+        let direction = direction.into();
+        let candidates = || {
+            panes
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != focused)
+                .map(|(index, pane)| (index, pane.rect))
+        };
+        let focused_rect = panes.get(focused)?.rect;
+        if crate::layout::nearest_rect_in_direction(focused_rect, direction, candidates(), false)
+            .is_some()
+        {
+            return None;
+        }
+        let target =
+            crate::layout::nearest_rect_in_direction(focused_rect, direction, candidates(), true)?;
+        Some(panes.get(target)?.pane_id.clone())
+    }
+
     pub(super) fn endpoint_method_for_action(
         &mut self,
         action: crate::input::KeybindAction,
@@ -1031,9 +1066,14 @@ impl ClientShellState {
             | KeybindAction::FocusPaneDown
             | KeybindAction::FocusPaneUp
             | KeybindAction::FocusPaneRight => {
+                let direction = direction(action)?;
+                if let Some(pane_id) = self.wrapped_focus_target(focused_pane.as_deref(), direction)
+                {
+                    return Some(Method::PaneFocus(PaneTarget { pane_id }));
+                }
                 Some(Method::PaneFocusDirection(PaneFocusDirectionParams {
                     pane_id: focused_pane,
-                    direction: direction(action)?,
+                    direction,
                 }))
             }
             KeybindAction::SwapPaneLeft

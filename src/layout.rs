@@ -371,36 +371,58 @@ pub fn find_in_direction(
     direction: NavDirection,
     panes: &[PaneInfo],
 ) -> Option<PaneId> {
-    let fr = focused.rect;
-
-    panes
+    let candidates = panes
         .iter()
         .enumerate()
         .filter(|(_, p)| p.id != focused.id)
-        .filter(|(_, p)| {
-            let r = p.rect;
-            match direction {
-                NavDirection::Left => {
-                    r.x + r.width <= fr.x && ranges_overlap(r.y, r.height, fr.y, fr.height)
+        .map(|(index, p)| (index, p.rect));
+    nearest_rect_in_direction(focused.rect, direction, candidates, false)
+        .and_then(|index| panes.get(index))
+        .map(|p| p.id)
+}
+
+pub fn nearest_rect_in_direction(
+    focused: Rect,
+    direction: NavDirection,
+    candidates: impl IntoIterator<Item = (usize, Rect)>,
+    wrap: bool,
+) -> Option<usize> {
+    let fr = focused;
+
+    candidates
+        .into_iter()
+        .filter(|(_, r)| {
+            let perpendicular_overlap = match direction {
+                NavDirection::Left | NavDirection::Right => {
+                    ranges_overlap(r.y, r.height, fr.y, fr.height)
                 }
-                NavDirection::Right => {
-                    r.x >= fr.x + fr.width && ranges_overlap(r.y, r.height, fr.y, fr.height)
+                NavDirection::Up | NavDirection::Down => {
+                    ranges_overlap(r.x, r.width, fr.x, fr.width)
                 }
-                NavDirection::Up => {
-                    r.y + r.height <= fr.y && ranges_overlap(r.x, r.width, fr.x, fr.width)
-                }
-                NavDirection::Down => {
-                    r.y >= fr.y + fr.height && ranges_overlap(r.x, r.width, fr.x, fr.width)
-                }
-            }
+            };
+            let ahead = match direction {
+                NavDirection::Left => r.x + r.width <= fr.x,
+                NavDirection::Right => r.x >= fr.x + fr.width,
+                NavDirection::Up => r.y + r.height <= fr.y,
+                NavDirection::Down => r.y >= fr.y + fr.height,
+            };
+            perpendicular_overlap && (wrap || ahead)
         })
-        .min_by_key(|(index, p)| {
-            let r = p.rect;
-            let edge_distance = match direction {
-                NavDirection::Left => fr.x.saturating_sub(r.x + r.width),
-                NavDirection::Right => r.x.saturating_sub(fr.x + fr.width),
-                NavDirection::Up => fr.y.saturating_sub(r.y + r.height),
-                NavDirection::Down => r.y.saturating_sub(fr.y + fr.height),
+        .min_by_key(|(index, r)| {
+            let primary = if wrap {
+                match direction {
+                    NavDirection::Left => -i32::from(r.x.saturating_add(r.width)),
+                    NavDirection::Right => i32::from(r.x),
+                    NavDirection::Up => -i32::from(r.y.saturating_add(r.height)),
+                    NavDirection::Down => i32::from(r.y),
+                }
+            } else {
+                i32::from(match direction {
+                    NavDirection::Left => fr.x.saturating_sub(r.x + r.width),
+                    NavDirection::Right => r.x.saturating_sub(fr.x + fr.width),
+                    NavDirection::Up => fr.y.saturating_sub(r.y + r.height),
+                    NavDirection::Down => r.y.saturating_sub(fr.y + fr.height),
+                })
             };
             let overlap = match direction {
                 NavDirection::Left | NavDirection::Right => {
@@ -418,9 +440,9 @@ pub fn find_in_direction(
                     range_center_distance(r.x, r.width, fr.x, fr.width)
                 }
             };
-            (edge_distance, Reverse(overlap), center_distance, *index)
+            (primary, Reverse(overlap), center_distance, *index)
         })
-        .map(|(_, p)| p.id)
+        .map(|(index, _)| index)
 }
 
 fn ranges_overlap(a_start: u16, a_len: u16, b_start: u16, b_len: u16) -> bool {
@@ -1204,6 +1226,31 @@ mod tests {
             find_in_direction(&focused, NavDirection::Left, &panes),
             Some(pane(3))
         );
+    }
+
+    #[test]
+    fn nearest_rect_in_direction_wraps_to_far_edge_on_the_same_row() {
+        let rects = [
+            Rect::new(0, 0, 10, 10),
+            Rect::new(10, 0, 10, 10),
+            Rect::new(20, 0, 10, 10),
+            Rect::new(0, 10, 30, 10),
+        ];
+        let search = |focused: usize, direction, wrap| {
+            let candidates = rects
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(index, _)| *index != focused);
+            nearest_rect_in_direction(rects[focused], direction, candidates, wrap)
+        };
+
+        assert_eq!(search(0, NavDirection::Left, false), None);
+        assert_eq!(search(0, NavDirection::Left, true), Some(2));
+        assert_eq!(search(2, NavDirection::Right, true), Some(0));
+        assert_eq!(search(1, NavDirection::Up, true), Some(3));
+        assert_eq!(search(3, NavDirection::Down, true), Some(1));
+        assert_eq!(search(0, NavDirection::Right, false), Some(1));
     }
 
     #[test]
